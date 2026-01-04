@@ -1,9 +1,10 @@
 import nmap
+import socket
 scanner = nmap.PortScanner()
+ip_address = socket.gethostbyname(socket.gethostname())
 
 print("NMAP Automation Tool")
 print("<----------------------------------------------------->")
-ip_address = input("Enter IP Address: ")
 print("Provided IP Address: ", ip_address)
 type(ip_address)
 response = input(""" \nEnter the type of scan to run:  
@@ -37,4 +38,5 @@ elif response == "3":
     print("Open Ports: ", scanner[ip_address]['tcp'].keys())
 
 elif response <= "4":
+
     print("ERROR: Enter a valid option")
