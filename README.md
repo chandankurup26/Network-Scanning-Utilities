@@ -1,6 +1,4 @@
-# Network-Scanning-Utilities
-A collection of Python-based tools for network scanning, host discovery, port mapping, and service detection.
+# Topology-Scanning-Utilities
+This project provides a Python-based implementation (`script.py`) for discovering network topology in environments that include routers or managed network devices. The script performs automated host discovery and builds a network topology graph by identifying reachable devices and their logical relationships within the network. It is intended for use in controlled lab or enterprise environments where routing devices are present and accessible, enabling a structured representation of network connectivity for analysis, visualization, or academic study.
 
-**scanner1.py** — Python CLI that automates Nmap SYN-ACK, UDP, and comprehensive scans, reporting open ports, protocols, and host status (requires Nmap and python-nmap).
-
-**scanner2.py** — Python script that runs an Nmap ping sweep over a CIDR to discover hosts and collect IPs + MAC addresses (requires Nmap and python-nmap).
+**Note:** This code is currently under development and is recommended to be executed only on Linux-based environments. Compatibility with other operating systems has not yet been tested or validated.
