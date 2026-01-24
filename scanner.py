@@ -2,9 +2,8 @@ from scapy.all import ARP, Ether, srp
 from scrapli import Scrapli
 import re, netifaces, ipaddress
 import networkx as nx
-import json
+import json, socket, manuf
 from networkx.readwrite import json_graph
-import socket
 
 ROUTER_MODE = False   #True - Router Based | False - Non-Router Based
 
@@ -33,7 +32,7 @@ def network_scan(network):
             "ip": received.psrc,
             "mac": received.hwsrc
         })
-    return [received.psrc for _, received in answered]
+    return devices
 
 def discover_neighbors(ip):
     device = SCRAPLI_BASE.copy()
@@ -84,11 +83,80 @@ def is_router_present(devices):
     print("[Auto-Detect] No router detected")
     return False
 
+def get_interface_type(interface):
+    if interface.startswith(("wl", "wlan", "wifi")):
+        return "wifi"
+    elif interface.startswith(("en", "eth", "eno", "ens")):
+        return "ethernet"
+    return "unknown"
+
+
+def guess_remote_link_type(mac):
+    if not mac:
+        return "unknown"
+
+    mobile_ouis = (
+        "Apple", "Samsung", "Xiaomi", "Huawei",
+        "OnePlus", "Motorola", "Realtek"
+    )
+    try:
+        parser = manuf.MacParser()
+        vendor = parser.get_manuf(mac)
+        if vendor and any(v in vendor for v in mobile_ouis):
+            return "wifi"
+    except Exception:
+        pass
+
+    return "ethernet"
+
+def add_implicit_l2_device(topology, devices, gateway_ip=None):
+    l2_node_id = "L2_SWITCH_AP"
+    topology.add_node(
+        l2_node_id,
+        role="implicit-l2",
+        discovered_by="inference"
+    )
+
+    for ip in devices:  # devices is a list of IP strings
+        topology.add_edge(
+            l2_node_id,
+            ip,
+            relation="logical-L2"
+        )
+
+    # Optionally link gateway if provided
+    if gateway_ip:
+        topology.add_edge(
+            l2_node_id,
+            gateway_ip,
+            relation="uplink"
+        )
+    return l2_node_id
+
 def save_topology(graph, filename="topology.json"):
     data = json_graph.node_link_data(graph)
     with open(filename, "w") as f:
         json.dump(data, f, indent=4)
     print(f"\nTopology saved to {filename}")
+
+def detect_real_loops(graph):
+    """
+    Detects loops only if cycles involve more than one L2/L3 device.
+    Host-only cycles are ignored.
+    """
+    cycles = nx.cycle_basis(graph)
+    real_loops = []
+
+    for cycle in cycles:
+        infra_nodes = [
+            n for n in cycle
+            if graph.nodes[n].get("role") in ("router", "implicit-l2")
+        ]
+
+        if len(infra_nodes) > 1:
+            real_loops.append(cycle)
+
+    return real_loops
 
 if __name__ == "__main__":
     try:
@@ -99,6 +167,7 @@ if __name__ == "__main__":
         
         iface_data = netifaces.ifaddresses(interface)[netifaces.AF_INET][0]
         netmask = iface_data['netmask']
+        local_iface_type = get_interface_type(interface)
         
         network = ipaddress.IPv4Interface(f"{gateway_ip}/{netmask}").network
         subnet = str(network)
@@ -109,8 +178,11 @@ if __name__ == "__main__":
         exit(1)
     
     # Step 1: ARP Scan
-    live_ips = network_scan(subnet)
+    devices = network_scan(subnet)
+    live_ips = [d["ip"] for d in devices]
+    mac_map = {d["ip"]: d["mac"] for d in devices}
     to_visit.update(live_ips)
+
     print(f"Discovered {len(live_ips)} Live Hosts\n")
 
     if not live_ips:
@@ -119,7 +191,18 @@ if __name__ == "__main__":
 
     #Adding ARP Nodes To Graph
     for ip in live_ips:
-        topology.add_node(ip, discovered_by="arp")
+        topology.add_node(
+            ip,
+            discovered_by="arp",
+            connection_type=guess_remote_link_type(mac_map.get(ip)),
+            mac_address=mac_map.get(ip)
+        )
+
+    topology.add_node(
+        gateway_ip,
+        role="gateway",
+        connection_type=local_iface_type
+    )
 
     ROUTER_MODE = is_router_present(live_ips)
     if ROUTER_MODE:
@@ -150,36 +233,28 @@ if __name__ == "__main__":
 
     else:
         print("\n[MODE] Router-less Logical Topology Enabled\n")
-        ips = live_ips
-        neighbors_map = {ip: set() for ip in live_ips}
 
-        for src_ip in live_ips:
-            # Send ARP request from this host to all other hosts
-            for dst_ip in live_ips:
-                if src_ip == dst_ip:
-                    continue
-                try:
-                    # Quick ARP request check: if dst_ip responds, they are neighbors
-                    arp_request = ARP(pdst=dst_ip)
-                    broadcast = Ether(dst="ff:ff:ff:ff:ff:ff")
-                    packet = broadcast/arp_request
-                    answered, _ = srp(packet, timeout=2, verbose=False)
-                    if answered:
-                        neighbors_map[src_ip].add(dst_ip)
-                except Exception:
-                    pass  # ignore unreachable hosts
-
-        # Add edges based on actual detected neighbors
-        for ip, neighbors in neighbors_map.items():
-            for neighbor_ip in neighbors:
-                if not topology.has_edge(ip, neighbor_ip):
-                    topology.add_edge(ip, neighbor_ip, relation="logical-L2")
+        # Create One implicit L2 Switch/AP
+        l2_node = add_implicit_l2_device(
+            topology=topology,
+            devices=live_ips,
+            gateway_ip=gateway_ip
+        )
+        print(f"[INFO] Implicit L2 device created: {l2_node}")
     
     # Output Topology
     print("\nDiscovered Network Topology:")
     print(f"Nodes: {topology.number_of_nodes()}")
     print(f"Edges: {topology.number_of_edges()}")
-    for edge in topology.edges():
-        print(f"{edge[0]} <--> {edge[1]}\n")
 
+    #Loop Detection
+    real_loops = detect_real_loops(topology)
+    if real_loops:
+        print("\n[WARNING] Real Network Loops Detected:")
+        for loop in real_loops:
+            print(" -> ".join(loop))
+    else:
+        print("\n[OK] No real network loops detected")
+
+    topology.graph["real_loops"] = real_loops
     save_topology(topology)
