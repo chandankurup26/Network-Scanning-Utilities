@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<title>Network Topology Viewer</title>
+<style>
+body {
+    font-family: Arial, sans-serif;
+    background: #f4f4f4;
+}
+
+h1, h2 {
+    text-align: center;
+    margin: 20px 0;
+}
+
+section {
+    margin-bottom: 60px;
+}
+
+svg {
+    display: block;
+    margin: 0 auto;
+    background: white;
+    border: 1px solid #ccc;
+    width: 100%;
+    height: 1000px;
+}
+
+/* Links */
+.link {
+    stroke: #666;
+    stroke-width: 2px;
+}
+.link.loop {
+    stroke: red;
+    stroke-width: 3px;
+}
+
+/* Nodes */
+.node circle {
+    stroke: #fff;
+    stroke-width: 1.2px;
+}
+
+.node text {
+    font-size: 9px;
+    text-anchor: middle;
+    pointer-events: none;
+}
+
+/* Tooltip */
+.tooltip {
+    position: absolute;
+    background: rgba(0,0,0,0.85);
+    color: white;
+    padding: 8px 10px;
+    border-radius: 4px;
+    font-size: 12px;
+    pointer-events: none;
+    opacity: 0;
+}
+
+/* Tables */
+table {
+    width: 95%;
+    margin: 20px auto;
+    border-collapse: collapse;
+    background: white;
+}
+
+th, td {
+    border: 1px solid #ccc;
+    padding: 8px;
+    text-align: center;
+}
+
+th {
+    background: #eee;
+}
+
+/* Loop info */
+.loop-box {
+    width: 95%;
+    margin: 10px auto;
+    background: #fff3f3;
+    border: 1px solid red;
+    padding: 10px;
+}
+
+/* Legend */
+.legend {
+    width: 95%;
+    margin: 10px auto 30px;
+    background: white;
+    border: 1px solid #ccc;
+    padding: 10px;
+    display: flex;
+    gap: 20px;
+    flex-wrap: wrap;
+    justify-content: center;
+}
+
+.legend-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+}
+
+.legend-circle {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+}
+
+.legend-line {
+    width: 20px;
+    height: 3px;
+    background: #666;
+}
+
+.legend-line.loop {
+    background: red;
+}
+
+.center-text {
+    text-align: center;
+}
+</style>
+</head>
+<body>
+
+<h1>Network Topology</h1>
+
+<div class="legend">
+    <div class="legend-item">
+        <div class="legend-circle" style="background:#ff7f0e"></div> Gateway
+    </div>
+    <div class="legend-item">
+        <div class="legend-circle" style="background:#2ca02c"></div> Implicit L2 (Switch / AP)
+    </div>
+    <div class="legend-item">
+        <div class="legend-circle" style="background:#1f77b4"></div> Host
+    </div>
+    <div class="legend-item">
+        <div class="legend-line"></div> Normal Link
+    </div>
+    <div class="legend-item">
+        <div class="legend-line loop"></div> Loop Link (Ethernet)
+    </div>
+</div>
+
+<section>
+<h2>Ethernet Topology</h2>
+<svg id="ethernet"></svg>
+</section>
+
+<section>
+<h2>Wi-Fi Topology</h2>
+<svg id="wifi"></svg>
+</section>
+
+<section>
+<h2>Devices</h2>
+<table id="deviceTable">
+<thead>
+<tr>
+<th>IP</th>
+<th>Role</th>
+<th>Connection Type</th>
+<th>MAC Address</th>
+</tr>
+</thead>
+<tbody></tbody>
+</table>
+</section>
+
+<section>
+<h2>Connections</h2>
+<table id="connectionTable">
+<thead>
+<tr>
+<th>Source</th>
+<th>Target</th>
+<th>Relation</th>
+</tr>
+</thead>
+<tbody></tbody>
+</table>
+</section>
+
+<section>
+<h2>Detected Ethernet Loops</h2>
+<div id="loopSection"></div>
+</section>
+
+<section>
+<h2>Detected IP Conflicts (Ethernet)</h2>
+<div id="ipConflictSection"></div>
+</section>
+
+<div class="tooltip" id="tooltip"></div>
+
+<script>
+d3.json("topology.json").then(data => {
+
+    const tooltip = d3.select("#tooltip");
+
+    const nodes = data.nodes.map(n => ({
+        id: n.id,
+        role: n.role || "host",
+        connection_type: n.connection_type || "unknown",
+        mac: n.mac_address || "-"
+    }));
+
+    const nodeById = new Map(nodes.map(n => [n.id, n]));
+
+    const links = data.edges.map(e => ({
+        source: nodeById.get(e.source),
+        target: nodeById.get(e.target),
+        relation: e.relation
+    })).filter(l => l.source && l.target);
+
+    const realLoops = data.graph?.real_loops || [];
+
+    /* Tables */
+    const deviceBody = d3.select("#deviceTable tbody");
+    nodes.forEach(n => {
+        deviceBody.append("tr").html(`
+            <td>${n.id}</td>
+            <td>${n.role}</td>
+            <td>${n.connection_type}</td>
+            <td>${n.mac}</td>
+        `);
+    });
+
+    const connBody = d3.select("#connectionTable tbody");
+    links.forEach(l => {
+        connBody.append("tr").html(`
+            <td>${l.source.id}</td>
+            <td>${l.target.id}</td>
+            <td>${l.relation}</td>
+        `);
+    });
+
+    const loopDiv = d3.select("#loopSection");
+    if (realLoops.length === 0) {
+        loopDiv.append("p")
+            .attr("class", "center-text")
+            .text("No Ethernet loops detected.");
+    } else {
+        realLoops.forEach(loop => {
+            loopDiv.append("div")
+                .attr("class", "loop-box")
+                .text(loop.join(" → "));
+        });
+    }
+
+    /* ==== IP CONFLICT DETECTION (ETHERNET ONLY) ==== */
+    const ipConflictDiv = d3.select("#ipConflictSection");
+    /* Clear previous content */
+    ipConflictDiv.html("");
+    /* Build IP → MAC list map */
+    const ipToMacs = new Map();
+
+    nodes.forEach(n => {
+        if (n.connection_type !== "ethernet") return;
+        if (!n.mac || n.mac === "-") return;
+
+        if (!ipToMacs.has(n.id)) {
+            ipToMacs.set(n.id, []);
+        }
+
+        if (!ipToMacs.get(n.id).includes(n.mac)) {
+            ipToMacs.get(n.id).push(n.mac);
+        }
+    });
+
+    /* Extract conflicts: same IP, multiple MACs */
+    const ipConflicts = [];
+    ipToMacs.forEach((macs, ip) => {
+        if (macs.length > 1) {
+            ipConflicts.push({ ip, macs });
+        }
+    });
+
+    /* Render results (same pattern as loop section) */
+    if (ipConflicts.length === 0) {
+    ipConflictDiv.append("p")
+        .attr("class", "center-text")
+        .text("No IP conflicts detected.");
+    } else {
+        ipConflicts.forEach(conflict => {
+            ipConflictDiv.append("div")
+                .attr("class", "loop-box")
+                .text(
+                    `IP ${conflict.ip} → MACs: ${conflict.macs.join(" , ")}`
+                );
+        });
+    }
+
+    function draw(svgId, type) {
+        const svg = d3.select(svgId);
+        svg.selectAll("*").remove();
+
+        const width = svg.node().getBoundingClientRect().width;
+        const height = +svg.style("height").replace("px","");
+
+        const viewNodes = nodes.filter(n =>
+            n.role !== "host" || n.connection_type === type
+        );
+
+        const viewLinks = links.filter(l =>
+            viewNodes.includes(l.source) &&
+            viewNodes.includes(l.target)
+        );
+
+        viewNodes.forEach(n => {
+            if (n.role === "gateway") {
+                n.fx = width / 2;
+                n.fy = height * 0.25;
+            }
+            if (n.role === "implicit-l2") {
+                n.fx = width / 2;
+                n.fy = height * 0.4;
+            }
+        });
+
+        const sim = d3.forceSimulation(viewNodes)
+            .force("link", d3.forceLink(viewLinks).distance(180))
+            .force("charge", d3.forceManyBody().strength(-520))
+            .force("collision", d3.forceCollide().radius(22))
+            .force("center", d3.forceCenter(width / 2, height / 2));
+
+        const link = svg.append("g")
+            .selectAll("line")
+            .data(viewLinks)
+            .enter()
+            .append("line")
+            .attr("class", d =>
+                realLoops.some(loop =>
+                    loop.includes(d.source.id) &&
+                    loop.includes(d.target.id)
+                ) && type === "ethernet"
+                ? "link loop"
+                : "link"
+            );
+
+        const node = svg.append("g")
+            .selectAll(".node")
+            .data(viewNodes)
+            .enter()
+            .append("g")
+            .attr("class", "node")
+            .on("mouseover", (e,d) => {
+                tooltip
+                    .style("opacity", 1)
+                    .html(`
+                        <strong>${d.id}</strong><br>
+                        Role: ${d.role}<br>
+                        Type: ${d.connection_type}<br>
+                        MAC: ${d.mac}
+                    `);
+            })
+            .on("mousemove", e => {
+                tooltip
+                    .style("left", (e.pageX + 12) + "px")
+                    .style("top", (e.pageY + 12) + "px");
+            })
+            .on("mouseout", () => tooltip.style("opacity", 0))
+            .call(d3.drag()
+                .on("start", e => e.subject.fx = e.subject.x)
+                .on("drag", e => {
+                    e.subject.fx = e.x;
+                    e.subject.fy = e.y;
+                })
+            );
+
+        node.append("circle")
+            .attr("r", 9)
+            .attr("fill", d =>
+                d.role === "gateway" ? "#ff7f0e" :
+                d.role === "implicit-l2" ? "#2ca02c" :
+                "#1f77b4"
+            );
+
+        node.append("text")
+            .attr("dy", 18)
+            .text(d => d.id);
+
+        sim.on("tick", () => {
+            link
+                .attr("x1", d => d.source.x)
+                .attr("y1", d => d.source.y)
+                .attr("x2", d => d.target.x)
+                .attr("y2", d => d.target.y);
+
+            node.attr("transform", d => `translate(${d.x},${d.y})`);
+        });
+    }
+
+    draw("#ethernet", "ethernet");
+    draw("#wifi", "wifi");
+
+    window.addEventListener("resize", () => {
+        draw("#ethernet", "ethernet");
+        draw("#wifi", "wifi");
+    });
+});
+
+</script>
+</body>
+</html>
