@@ -9,6 +9,7 @@ It is intended for use in controlled lab or enterprise environments where routin
 - This code is currently under development and is recommended to be executed **only on Linux-based environments**. Compatibility with other operating systems has not yet been tested or validated.
 - The `topology.json` file included in this repository is a **sample output file** provided for reference and testing purposes.
 - The `index.html` file renders a web-based visualization of the discovered network topology. To view it correctly, it must be served via a local HTTP server.
+- The `Continous Scanner` directory is a variation of the `scanner.py` file and the corresponding `index.html` that supports continous scanning and a live view of active and inactive devices on a network.
 
 ## Viewing the Topology Visualization
 
