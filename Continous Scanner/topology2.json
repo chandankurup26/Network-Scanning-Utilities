@@ -1,0 +1,112 @@
+{
+  "directed": false,
+  "multigraph": false,
+  "graph": {},
+  "nodes": [
+    {
+      "role": "gateway",
+      "mac_address": "20:0c:86:1e:73:70",
+      "connection_type": "ethernet",
+      "last_seen": 1770740341.5629144,
+      "inactive": false,
+      "id": "192.168.1.1"
+    },
+    {
+      "role": "host",
+      "mac_address": "e0:2e:0b:d4:cf:5b",
+      "connection_type": "ethernet",
+      "last_seen": 1770740340.2673244,
+      "inactive": false,
+      "id": "192.168.1.36"
+    },
+    {
+      "role": "host",
+      "mac_address": "d8:c0:a6:ba:46:b9",
+      "connection_type": "ethernet",
+      "last_seen": 1770740340.2673905,
+      "inactive": false,
+      "id": "192.168.1.48"
+    },
+    {
+      "role": "host",
+      "mac_address": "7c:76:68:1d:ee:71",
+      "connection_type": "wifi",
+      "last_seen": 1770740340.267358,
+      "inactive": false,
+      "id": "192.168.1.42"
+    },
+    {
+      "role": "implicit-l2",
+      "inactive": false,
+      "id": "L2_SWITCH_AP"
+    },
+    {
+      "role": "host",
+      "mac_address": "fe:a5:d4:84:77:41",
+      "connection_type": "ethernet",
+      "last_seen": 1770740340.2674234,
+      "inactive": false,
+      "id": "192.168.1.33"
+    },
+    {
+      "role": "host",
+      "mac_address": "6e:e0:7b:e1:e0:90",
+      "connection_type": "ethernet",
+      "last_seen": 1770740340.2674575,
+      "inactive": false,
+      "id": "192.168.1.45"
+    },
+    {
+      "role": "host",
+      "mac_address": "e8:fb:1c:f0:1e:d1",
+      "connection_type": "ethernet",
+      "last_seen": 1770740340.2674885,
+      "inactive": false,
+      "id": "192.168.1.35"
+    }
+  ],
+  "edges": [
+    {
+      "relation": "logical-L2",
+      "status": "active",
+      "source": "192.168.1.1",
+      "target": "L2_SWITCH_AP"
+    },
+    {
+      "relation": "logical-L2",
+      "status": "active",
+      "source": "192.168.1.36",
+      "target": "L2_SWITCH_AP"
+    },
+    {
+      "relation": "logical-L2",
+      "status": "active",
+      "source": "192.168.1.48",
+      "target": "L2_SWITCH_AP"
+    },
+    {
+      "relation": "logical-L2",
+      "status": "active",
+      "source": "192.168.1.42",
+      "target": "L2_SWITCH_AP"
+    },
+    {
+      "relation": "logical-L2",
+      "status": "active",
+      "source": "L2_SWITCH_AP",
+      "target": "192.168.1.35"
+    },
+    {
+      "relation": "logical-L2",
+      "status": "active",
+      "source": "L2_SWITCH_AP",
+      "target": "192.168.1.33"
+    },
+    {
+      "relation": "logical-L2",
+      "status": "active",
+      "source": "L2_SWITCH_AP",
+      "target": "192.168.1.45"
+    }
+  ]
+}

@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<title>Live Network Topology</title>
+<style>
+/* --- Original Styles Preserved --- */
+body { font-family: Arial, sans-serif; background: #f4f4f4; }
+h1, h2 { text-align: center; margin: 20px 0; }
+section { margin-bottom: 60px; }
+svg { display: block; margin: 0 auto; background: white; border: 1px solid #ccc; width: 100%; height: 600px; }
+.link { stroke: #666; stroke-width: 2px; }
+.link.loop { stroke: red; stroke-width: 3px; }
+
+/* NEW: Dotted link for disconnected devices */
+.link.disconnected { stroke: #bbb; stroke-dasharray: 5,5; stroke-width: 1.5px; opacity: 0.6; }
+
+.node circle { stroke: #fff; stroke-width: 1.2px; transition: fill 0.3s; }
+.node.offline circle { fill: #999 !important; stroke: #666; opacity: 0.5; }
+.node text { font-size: 9px; text-anchor: middle; pointer-events: none; }
+.tooltip { position: absolute; background: rgba(0,0,0,0.85); color: white; padding: 8px 10px; border-radius: 4px; font-size: 12px; pointer-events: none; opacity: 0; z-index: 10; }
+table { width: 95%; margin: 20px auto; border-collapse: collapse; background: white; }
+th, td { border: 1px solid #ccc; padding: 8px; text-align: center; }
+th { background: #eee; }
+.loop-box { width: 95%; margin: 10px auto; background: #fff3f3; border: 1px solid red; padding: 10px; }
+.legend { width: 95%; margin: 10px auto 30px; background: white; border: 1px solid #ccc; padding: 10px; display: flex; gap: 20px; flex-wrap: wrap; justify-content: center; }
+.legend-item { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+.legend-circle { width: 14px; height: 14px; border-radius: 50%; }
+.legend-line { width: 20px; height: 3px; background: #666; }
+.center-text { text-align: center; }
+</style>
+</head>
+<body>
+
+<h1>Network Topology (Live)</h1>
+
+<div class="legend">
+    <div class="legend-item"><div class="legend-circle" style="background:#ff7f0e"></div> Gateway</div>
+    <div class="legend-item"><div class="legend-circle" style="background:#2ca02c"></div> Implicit L2 (Switch / AP)</div>
+    <div class="legend-item"><div class="legend-circle" style="background:#1f77b4"></div> Online Host</div>
+    <div class="legend-item"><div style="width: 20px; border-bottom: 2px dashed #bbb;"></div> Disconnected Link</div>
+</div>
+
+<section><h2>Ethernet Topology</h2><svg id="ethernet"></svg></section>
+<section><h2>Wi-Fi Topology</h2><svg id="wifi"></svg></section>
+
+<section>
+    <h2>Devices</h2>
+    <table id="deviceTable">
+        <thead><tr><th>IP</th><th>Role</th><th>Connection Type</th><th>MAC Address</th><th>Status</th></tr></thead>
+        <tbody></tbody>
+    </table>
+</section>
+
+<section>
+    <h2>Connections</h2>
+    <table id="connectionTable">
+        <thead><tr><th>Source</th><th>Target</th><th>Relation</th></tr></thead>
+        <tbody></tbody>
+    </table>
+</section>
+
+<section><h2>Detected Ethernet Loops</h2><div id="loopSection"></div></section>
+<section><h2>Detected IP Conflicts (Ethernet)</h2><div id="ipConflictSection"></div></section>
+
+<div class="tooltip" id="tooltip"></div>
+
+<script>
+const tooltip = d3.select("#tooltip");
+
+function updateDashboard() {
+    d3.json("topology.json").then(data => {
+        const nodes = data.nodes.map(n => ({
+            id: n.id,
+            role: n.role || "host",
+            connection_type: n.connection_type || "unknown",
+            mac: n.mac_address || "-",
+            status: n.status || "online"
+        }));
+
+        const nodeById = new Map(nodes.map(n => [n.id, n]));
+        const links = data.edges.map(e => ({
+            source: nodeById.get(e.source),
+            target: nodeById.get(e.target),
+            relation: e.relation
+        })).filter(l => l.source && l.target);
+
+        const realLoops = data.graph?.real_loops || [];
+
+        // --- Update Tables ---
+        const deviceBody = d3.select("#deviceTable tbody");
+        deviceBody.html(""); 
+        nodes.forEach(n => {
+            deviceBody.append("tr").html(`<td>${n.id}</td><td>${n.role}</td><td>${n.connection_type}</td><td>${n.mac}</td><td style="color:${n.status==='online'?'green':'red'}">${n.status}</td>`);
+        });
+
+        const connBody = d3.select("#connectionTable tbody");
+        connBody.html("");
+        links.forEach(l => {
+            connBody.append("tr").html(`<td>${l.source.id}</td><td>${l.target.id}</td><td>${l.relation}</td>`);
+        });
+
+        // --- Loop Detection ---
+        const loopDiv = d3.select("#loopSection").html("");
+        if (realLoops.length === 0) {
+            loopDiv.append("p").attr("class", "center-text").text("No Ethernet loops detected.");
+        } else {
+            realLoops.forEach(loop => loopDiv.append("div").attr("class", "loop-box").text(loop.join(" → ")));
+        }
+
+        // --- IP Conflict Detection ---
+        const ipConflictDiv = d3.select("#ipConflictSection").html("");
+        const ipToMacs = new Map();
+        nodes.forEach(n => {
+            if (n.connection_type !== "ethernet" || !n.mac || n.mac === "-" || n.status === 'offline') return;
+            if (!ipToMacs.has(n.id)) ipToMacs.set(n.id, []);
+            if (!ipToMacs.get(n.id).includes(n.mac)) ipToMacs.get(n.id).push(n.mac);
+        });
+
+        const ipConflicts = [];
+        ipToMacs.forEach((macs, ip) => { if (macs.length > 1) ipConflicts.push({ ip, macs }); });
+
+        if (ipConflicts.length === 0) {
+            ipConflictDiv.append("p").attr("class", "center-text").text("No IP conflicts detected.");
+        } else {
+            ipConflicts.forEach(c => ipConflictDiv.append("div").attr("class", "loop-box").text(`IP ${c.ip} → MACs: ${c.macs.join(" , ")}`));
+        }
+
+        // --- Draw Graphs ---
+        function draw(svgId, type) {
+            const svg = d3.select(svgId);
+            svg.selectAll("*").remove();
+            const width = svg.node().getBoundingClientRect().width;
+            const height = 600;
+
+            const viewNodes = nodes.filter(n => n.role !== "host" || n.connection_type === type);
+            const viewLinks = links.filter(l => viewNodes.includes(l.source) && viewNodes.includes(l.target));
+
+            const sim = d3.forceSimulation(viewNodes)
+                .force("link", d3.forceLink(viewLinks).distance(150))
+                .force("charge", d3.forceManyBody().strength(-400))
+                .force("center", d3.forceCenter(width / 2, height / 2));
+
+            const link = svg.append("g")
+                .selectAll("line")
+                .data(viewLinks)
+                .enter().append("line")
+                .attr("class", d => {
+                    let cls = "link";
+                    // Modification: Apply 'disconnected' if either end is offline
+                    if (d.source.status === 'offline' || d.target.status === 'offline') cls += " disconnected";
+                    if (realLoops.some(loop => loop.includes(d.source.id) && loop.includes(d.target.id)) && type === "ethernet") cls += " loop";
+                    return cls;
+                });
+
+            const node = svg.append("g")
+                .selectAll(".node")
+                .data(viewNodes)
+                .enter().append("g")
+                .attr("class", d => "node " + d.status)
+                .on("mouseover", (e, d) => {
+                    tooltip.style("opacity", 1).html(`<strong>${d.id}</strong><br>Role: ${d.role}<br>Status: ${d.status}<br>MAC: ${d.mac}`);
+                })
+                .on("mousemove", e => tooltip.style("left", (e.pageX + 12) + "px").style("top", (e.pageY + 12) + "px"))
+                .on("mouseout", () => tooltip.style("opacity", 0))
+                .call(d3.drag().on("start", e => { e.subject.fx = e.x; e.subject.fy = e.y; }).on("drag", e => { e.subject.fx = e.x; e.subject.fy = e.y; }));
+
+            node.append("circle")
+                .attr("r", 10)
+                .attr("fill", d => d.role === "gateway" ? "#ff7f0e" : d.role === "implicit-l2" ? "#2ca02c" : "#1f77b4");
+
+            node.append("text").attr("dy", 18).text(d => d.id);
+
+            sim.on("tick", () => {
+                link.attr("x1", d => d.source.x).attr("y1", d => d.source.y).attr("x2", d => d.target.x).attr("y2", d => d.target.y);
+                node.attr("transform", d => `translate(${d.x},${d.y})`);
+            });
+        }
+
+        draw("#ethernet", "ethernet");
+        draw("#wifi", "wifi");
+    }).catch(e => console.log("Waiting for data file...", e));
+}
+// Update every 5 seconds
+updateDashboard();
+setInterval(updateDashboard, 5000);
+</script>
+</body>
+</html>
